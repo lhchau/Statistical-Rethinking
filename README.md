@@ -1,0 +1,2 @@
+# Statistical-Rethinking
+ self-study

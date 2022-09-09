@@ -1,0 +1,348 @@
+---
+title: "Untitled"
+author: "Hoang-Chau Luong"
+date: '2022-09-09'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# **Medium**
+
+## **1**
+
+Modify the DAG on page 186 to include the variable `V`, an unobserved cause of `C` and `Y:C ← V → Y`. Reanalyze the DAG. How many paths connect X to Y? Which must be closed? Which variables should you condition on now?
+
+```{r}
+library(rethinking)
+library(dagitty)
+library(ggdag)
+library(tidyverse)
+library(tidybayes)
+library(brms)
+
+dag_6M1 <- dagitty("dag{
+                   U [unobserved]
+                   V [unobserved]
+                   X -> Y
+                   X <- U -> B <- C -> Y
+                   U <- A -> C
+                   C <- V -> Y
+                   }")
+
+coordinates(dag_6M1) <- list(
+  x = c(X = 0, Y = 2, U = 0, A = 1, B = 1, C = 2, V = 2.5),
+  y = c(X = 2, Y = 2, U = 1, A = 0.5, B = 1.5, C = 1, V = 1.5)
+)
+
+drawdag(dag_6M1)
+```
+
+1)  List the path:
+2)  Backdoor
+3)  Adjustment set
+
+-   X -\> X (The causal path)
+
+-   X \<- U -\> B \<- C -\> Y (backdoor) =\> This path is closed because B is a collider
+
+-   X \<- U -\> B \<- C \<- V -\> Y (backdoor) =\> This path is closed because B is a collider
+
+-   X \<- U \<- A -\> C -\> Y (backdoor) =\> Condition on A to close this path
+
+-   X \<- U \<- A -\> C \<- V -\> Y (backdoor) =\> This path is closed because C is a collider
+
+    We want to leave path 1 open and make sure all of the others are closed, because they are non-causal paths that will confound inference. As before, all the paths through B are already closed, since B is a collider. So we don't condition on B. Similarly, the new paths through both A and V are closed, because C is a collider on those paths. So it's enough to condition on A to close all non-causal paths
+
+    If you like, you can check using dagitty:
+
+    ```{r}
+    adjustmentSets( dag_6M1 , exposure="X" , outcome="Y" )
+    # { A }
+    ```
+
+Note that in the chapter, where V is absent, it is also fine to condition on C. It isn't now.
+
+## **2**
+
+::: question
+> Sometimes, in order to avoid multicollinearity, people inspect pairwise correlations among predictors before including them in a model. This is a bad procedure, because what matters is the conditional association, not the association before the variables are included in the model. To highlight this, consider the DAG $X \rightarrow Z \rightarrow Y$. Simulate data from this DAG so that the correlation between $X$ and $Z$ is very large. Then include both in a model prediction $Y$. Do you observe any multicollinearity? Why or why not? What is different from the legs example in the chapter?
+:::
+
+```{r}
+n <- 1e4
+set.seed(11)
+X <- rnorm(n)
+Z <- rnorm(n, 2*X, 0.2)
+cor(X, Z)
+
+Y <- rnorm(n, Z)
+cor(Y, Z)
+
+df <- tibble(X = standardize(X),
+             Y = standardize(Y), 
+             Z = standardize(Z))
+
+lm_YX  <- lm(Y ~ X, data = df)
+lm_YZ  <- lm(Y ~ Z, data = df)
+lm_YXZ <- lm(Y ~ X + Z, data = df)
+
+summary(lm_YX)
+summary(lm_YZ)
+summary(lm_YXZ)
+
+m_6M2 <- quap(
+  alist(
+    Y ~ dnorm( mu , sigma ),
+    mu <- a + bX*X + bZ*Z,
+    c(a,bX,bZ) ~ dnorm(0,1),
+    sigma ~ dexp(1)
+  ) , data=list(X=X,Y=Y,Z=Z) )
+precis( m_6M2 )
+```
+
+Simulate with large sample
+
+```{r}
+f <- function(n = 1e4, bXY = 1, bXZ = 2, bZY = 1){
+  X <- rnorm(n)
+  Z <- rnorm(n, bXZ*X)
+  Y <- rnorm(n, bZY*Z)
+  bX <- coef(lm(Y ~ X))['X']
+  bXZ <- coef(lm(Y ~ X + Z))['X']
+  return(c(bX, bXZ))
+}
+```
+
+```{r}
+set.seed(1981)
+
+n <- 1e4
+df <- tibble(x = rnorm(n)) %>% 
+  mutate(z = rnorm(n, mean = x, sd = 0.1),
+         y = rnorm(n, mean = z),
+         across(everything(), standardize))
+
+sim_cor <- cor(df$x, df$z)
+
+b6m2 <- brm(y ~ 1 + x + z, data = df, family = gaussian,
+            prior = c(prior(normal(0, 0.2), class = Intercept),
+                      prior(normal(0, 0.5), class = b),
+                      prior(exponential(1), class = sigma)),
+            iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+            file = here::here("fits", "chp6", "b6m2"))
+
+as_draws_df(b6m2) %>%
+  as_tibble() %>% 
+  select(b_Intercept, b_x, b_z, sigma) %>%
+  pivot_longer(everything()) %>%
+  ggplot(aes(x = value, y = name)) +
+  stat_halfeye(.width = c(0.67, 0.89, 0.97))
+```
+
+# **Hard**
+
+## **1**
+
+::: question
+> Use the Waffle House data, `data(WaffleDivorce), to find the total causal inference of number of Waffle Houses on divorce rate. Justify your model or models with a causal graph
+:::
+
+For this problem, we'll use the DAG given in the chapter example:
+
+```{r}
+waffle_dag <- dagitty("dag{
+                      S -> W -> D <- A -> M -> D
+                      S -> A
+                      S -> M
+}")
+
+coordinates(waffle_dag) <- list(x = c(A = 1, S = 1, M = 2, W = 3, D = 3),
+                                y = c(A = 1, S = 3, M = 2, W = 3, D = 1))
+
+ggplot(waffle_dag, aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_dag_text(color = "black", size = 10) +
+  geom_dag_edges(edge_color = "black", edge_width = 2,
+                 arrow_directed = grid::arrow(length = grid::unit(15, "pt"),
+                                              type = "closed")) +
+  theme_void()
+```
+
+   In order to estimate total causal effect of Waffle House (W) on divorce rate (D), we have to condition on either S or both A and M. For simplicity, we'll condition on only S.
+   
+```{r}
+impliedConditionalIndependencies(waffle_dag)
+
+adjustmentSets(waffle_dag, exposure = "W", outcome = "D")
+```
+   
+```{r}
+data("WaffleDivorce")
+waffle <- WaffleDivorce %>%
+  as_tibble() %>%
+  select(D = Divorce,
+         A = MedianAgeMarriage,
+         M = Marriage,
+         S = South,
+         W = WaffleHouses) %>%
+  mutate(across(-S, standardize),
+         S = factor(S))
+
+waff_mod <- brm(D ~ 1 + W + S, data = waffle, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+                file = here::here("fits", "chp6", "b6h1"))
+```
+
+  Finally, we can see the causal estimate of Waffle Houses on divorce rate by looking at the posterior distribution of the `b_W` parameter.
+  
+  Here, we can see that the estimate is very small, indicating that the number of Waffle Houses has little to no causal impact on the divorce rate in a state.
+
+```{r}
+spread_draws(waff_mod, b_W) %>% 
+  ggplot(aes(x = b_W)) +
+  stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+  labs(x = expression(beta[W]), y = "Density")
+```
+
+## **2**
+
+::: question
+> Build a series of models to test the implied conditional independencies of the causal graph you used in the previous problem. If any of the tests fail, how do you think the graph needs to be ammended? Does the graph need more or fewer arrows? Feel free to nominate variables that aren’t in the data.
+:::
+  
+```{r}
+waff_ci1 <- brm(A ~ 1 + W + S, 
+                data = waffle, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 123,
+                file = here::here("fits", "chp6", "b6h2-1"))
+
+waff_ci2 <- brm(D ~ 1 + S + A + M + W,
+                data = waffle, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 123,
+                file = here::here("fits", "chp6", "b6h2-2"))
+
+waff_ci3 <- brm(M ~ 1 + W + S,
+                data = waffle, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 123,
+                file = here::here("fits", "chp6", "b6h2-3"))
+```
+
+Finally, we can estimate the posterior distributions for the implied conditional independence. The implied conditional independency tested in the first model A⊥⊥W|S, appears to be met, as the $\beta_{W}$ coefficient from the model is centered on zero. The same is true for the third implied conditional independency, M⊥⊥W|S. The second implied conditional independency, $D⊥⊥S|A,M,W$, is less clear, as the posterior distribution overlaps zero, but does indicate a *slightly positive* relationship between divorce rate a state’s “southern” status, even after conditioning on median age of marriage, marriage rate, and the number of waffle houses. This is likely because there are other variables missing from the model that are related to both divorce rate and also southerness. For example, `religiosity`, `family size`, and `education` could all plausibly impact divorce rates and show regional differences in the United States.
+ 
+```{r}
+lbls <- c(expression("Model 1:"~beta[W]),
+          expression("Model 2:"~beta[S]),
+          expression("Model 3:"~beta[W]))
+
+bind_rows(
+  gather_draws(waff_ci1, b_W) %>%
+    ungroup() %>%
+    mutate(model = "ICI 1"),
+  gather_draws(waff_ci2, b_S1) %>%
+    ungroup() %>%
+    mutate(model = "ICI 2"),
+  gather_draws(waff_ci3, b_W) %>%
+    ungroup() %>%
+    mutate(model = "ICI 3")
+) %>%
+  ggplot(aes(x = .value, y= model)) +
+  stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+  scale_y_discrete(labels = lbls) +
+  labs(x = "Parameter Estimate", y = "Implied Conditional Independency")
+```
+
+## **3**
+
+>All three problems below are based on the same data. The data in `data(foxes)` are 116 foxes from 30 different urban groups in England. These foxes are like street gangs. Group size varies from 2 to 8 individuals. Each group maintains its own urban territory. Some territories are larger than others. The `area` variable encodes this information. Some territories also have more `avgfood` than others. We want to model the `weight` of each fox. For the problems below, assume the following DAG:
+
+::: question
+> Use a model to infer the total causal influence of area on weight. Would increasing the area available to each fox make it heavier (healthier)? You might want to standardize the variables. Regardless, use prior predictive simulation to show that your model’s prior predictions stay within the possible outcome range
+:::
+
+First let's load the data and standardize the variables
+
+```{r}
+data("foxes")
+
+fox_dat <- foxes %>% 
+  as_tibble() %>% 
+  select(area, avgfood, groupsize, area, weight) %>% 
+  mutate(across(everything(), standardize))
+
+fox_dat
+```
+
+```{r}
+fox_dag <- dagitty("dag{
+                   area -> avgfood -> groupsize -> weight
+                   avgfood -> weight
+}")
+
+coordinates(fox_dag) <- list(x = c(avgfood = 1, weight = 2, area = 2, groupsize = 3),
+                             y = c(avgfood = 2, weight = 1, area = 3, groupsize = 2))
+
+adjustmentSets(fox_dag, exposure = "area", outcome = "weight")
+```
+
+```{r}
+set.seed(2020)
+
+n <- 1000
+tibble(group = seq_len(n),
+       alpha = rnorm(n, 0, 0.2),
+       beta  = rnorm(n, 0, 0.5)) %>% 
+  expand(nesting(group, alpha, beta),
+         area = seq(from = -2, to = 2, length.out = 100)) %>% 
+  mutate(weight = alpha + beta * area) %>% 
+  ggplot(aes(x = area, y = weight, group = group)) +
+  geom_line(alpha = 1/10) +
+  geom_hline(yintercept = c((0 - mean(foxes$weight)) / sd(foxes$weight),
+                            (max(foxes$weight) - mean(foxes$weight))/ sd(foxes$weight)), linetype = c("dashed", "solid"), color = "red") 
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
