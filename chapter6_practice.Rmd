@@ -265,6 +265,7 @@ bind_rows(
   labs(x = "Parameter Estimate", y = "Implied Conditional Independency")
 ```
 
+
 ## **3**
 
 >All three problems below are based on the same data. The data in `data(foxes)` are 116 foxes from 30 different urban groups in England. These foxes are like street gangs. Group size varies from 2 to 8 individuals. Each group maintains its own urban territory. Some territories are larger than others. The `area` variable encodes this information. Some territories also have more `avgfood` than others. We want to model the `weight` of each fox. For the problems below, assume the following DAG:
@@ -298,16 +299,177 @@ coordinates(fox_dag) <- list(x = c(avgfood = 1, weight = 2, area = 2, groupsize 
 adjustmentSets(fox_dag, exposure = "area", outcome = "weight")
 ```
 
+```{r}
+set.seed(2020)
+
+n <- 1000
+tibble(group = seq_len(n),
+       alpha = rnorm(n, 0, 0.2),
+       beta  = rnorm(n, 0, 0.5)) %>% 
+  expand(nesting(group, alpha, beta),
+         area = seq(from = -2, to = 2, length.out = 100)) %>% 
+  mutate(weight = alpha + beta * area) %>% 
+  ggplot(aes(x = area, y = weight, group = group)) +
+  geom_line(alpha = 1/10) +
+  geom_hline(yintercept = c((0 - mean(foxes$weight)) / sd(foxes$weight),
+                            (max(foxes$weight) - mean(foxes$weight))/ sd(foxes$weight)), linetype = c("dashed", "solid"), color = "red") +
+  annotate(geom = "text", x = -2, y = -3.83, hjust = 0, vjust = 1,
+           label = "No weight") +
+  annotate(geom = "text", x = -2, y = 2.55, hjust = 0, vjust = 0,
+           label = "Maximum weight") +
+  expand_limits(y = c(-4, 4)) +
+  labs(x = "Standardized Area", y = "Standardized Weight")
+```
+
+Finally, we can estimate the model. Conditional on this DAG and our data, it doesn’t appear as though area size has any causal effect on the weight of foxes in this sample.
+
+```{r}
+area_mod <- brm(weight ~ 1 + area, 
+                data = fox_dat, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 123,
+                file = here::here("fits", "chp6", "b6h3"))
+
+as_draws_df(area_mod) %>% 
+  as_tibble() %>% 
+  select(b_Intercept, b_area, sigma) %>% 
+  pivot_longer(everything()) %>% 
+  mutate(name = factor(name, levels = c("b_Intercept", "b_area", "sigma"))) %>% 
+  ggplot(aes(x = value, y = fct_rev(name))) +
+  stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+  labs(x = "Parameter Estimate", y = "Parameter")
+
+data(foxes)
+d <- foxes
+d$W <- standardize(d$weight)
+d$A <- standardize(d$area)
+m1 <- quap(
+  alist(
+    W ~ dnorm( mu , sigma ),
+    mu <- a + bA*A,
+    a ~ dnorm(0,0.2),
+    bA ~ dnorm(0,0.5),
+    sigma ~ dexp(1)
+  ), data=d )
+precis(m1)
+
+#       mean   sd  5.5% 94.5%
+# a     0.00 0.08 -0.13  0.13
+# bA    0.02 0.09 -0.13  0.16
+# sigma 0.99 0.06  0.89  1.09
+```
+
+Territory size seems to have no total causal influence on weight, at least not in this sample.
+
+## **4**
+
+::: question
+> Now infer the causal impact of adding food to a territory. Would this make foxes heavier? Which covariates do you need to adjust for to estimate the total causal influence of food?
+:::
+
+To estimate the total causal impact of food, we don’t need to adjust for any variables. There is a direct path from average food to weight and an indirect path through group size. If we condition on group size, then that path would be closed and we would be left with only the direct effect. However, as we want the total effect, there is no adjustment to be made.
+
+```{r}
+adjustmentSets(fox_dag, exposure = "avgfood", outcome = "weight")
+```
+
+When we estimate the model regressing weight on average food available, we see that there is no effect of food on weight. Given the DAG, this is expected. If there were an impact of food on weight, then we would have expected to see an impact of area on weight in the previous problem, as area is upstream of average food in the causal model.
+
+```{r}
+food_mod <- brm(weight ~ 1 + avgfood, 
+                data = fox_dat, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 123,
+                file = here::here("fits", "chp6", "b6h4"))
+
+as_draws_df(food_mod) %>% 
+  as_tibble() %>% 
+  select(b_Intercept, b_avgfood, sigma) %>% 
+  pivot_longer(everything()) %>% 
+  mutate(name = factor(name, levels = c("b_Intercept", "b_avgfood", "sigma"))) %>%
+  ggplot(aes(x = value, y = fct_rev(name))) +
+  stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+  labs(x = "Parameter Value", "Parameter")
+```
 
 
+```{r}
+d$W <- standardize(d$weight)
+d$aF <- standardize(d$avgfood)
+m2 <- quap(
+  alist(
+    W ~ dnorm(mu, sigma),
+    mu <- a + bF*aF,
+    a ~ dnorm(0, 0.2),
+    bF ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = d
+)
+
+precis(m2)
+```
+
+Again nothing. Adding food does not change weight. This shouldn’t surprise you, if the DAG is correct, because `area` is upstream of `avgfood`.
+
+## **5**
+
+::: question
+> Now infer the causal impact of group size. Which covariates do you need to adjust for? Looking at the posterior distribution of the resulting model, what do you think explains these data? That is, can you explain the estimates for all three problems? How do they go together?
+:::
+
+When assessing the causal impact of group size, there is one back-door path: `G ← F → W`. In this path, average food, `F`, is a fork, so we have to condition on it to isolate the effect of group size.
+
+```{r}
+adjustmentSets(fox_dag, exposure = "groupsize", outcome = "weight")
+#> { avgfood }
+```
+
+When we estimate this model, we see a negative effect for group size when controlling for food. We also now see a positive effect for average food when controlling for group size. Thus, the causal effect of group size is to decrease weight. Logically this makes sense, as there would be less food for each fox. This model also indicates that the direct effect of average food is to increase weight. That is, if group size is held constant, more food results in more weight. However, the total causal effect of food on weight, as we saw in the last problem, is nothing. This is because more food also leads to larger groups, which in turn decreases weight. This is a masking effect, also called a `post-treatment bias`.
+
+```{r}
+grp_mod <- brm(weight ~ 1 + avgfood + groupsize, data = fox_dat,
+               family = gaussian,
+               prior = c(prior(normal(0, 0.2), class = Intercept),
+                         prior(normal(0, 0.5), class = b,),
+                         prior(exponential(1), class = sigma)),
+               iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 1234,
+               file = here::here("fits", "chp6", "b6h5"))
+
+as_draws_df(grp_mod) %>%
+  as_tibble() %>%
+  select(b_Intercept, b_avgfood, b_groupsize, sigma) %>%
+  pivot_longer(everything()) %>%
+  mutate(name = factor(name, levels = c("b_Intercept", "b_avgfood",
+                                        "b_groupsize", "sigma"))) %>%
+  ggplot(aes(x = value, y = fct_rev(name))) +
+  stat_halfeye(.width = c(0.67, 0.89, 0.97)) +
+  labs(x = "Parameter Estimate", y = "Parameter")
+```
 
 
+The variable `groupsize` does have a back-door path, passing through `avgfood`. So to infer the causal influence of `groupsize`, we need to close that path. This implies a model with both `groupsize` and `avgfood` as predictors
+
+```{r}
+m3 <- quap(
+  alist(
+    weight ~ dnorm(mu, sigma),
+    mu <- a + bG*groupsize + bF*avgfood,
+    a ~ dnorm(0, 0.2),
+    bG ~ dnorm(0, 0.5),
+    bF ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data = fox_dat
+)
+
+precis(m3)
+```
 
 
-
-
-
-
+It looks like group size is negatively associated with weight, controlling for food. Similarly, food is positively associated with weight, controlling for group size. So the causal influence of group size is to reduce weight—less food for each fox. And the direct causal influence of food is positive, of course. But the total causal influence of food is still nothing, since it causes larger groups. This is a masking effect, like in the milk energy example. But the causal explanation here is that more foxes move into a territory until the food available to each is no better than the food in a neighboring territory. Every territory ends up equally good/bad on average. This is known in behavioral ecology as an `ideal free distribution`.
 
 
 
