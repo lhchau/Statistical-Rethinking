@@ -1,0 +1,129 @@
+---
+title: "Untitled"
+author: "Hoang-Chau Luong"
+date: '2022-09-12'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+# **Easy**
+
+## **1**
+
+State the three motivating criteria that define information entropy. Try to express each in your own words.
+
+**Answer**
+
+Insight of information entropy is "How much is our uncertainty reduced by learning an outcome? 3 criteria:
+
+1. The measure of uncertainty should be continuous
+2. The measure of uncertainty should increase as the number of possible events increases -> Sample set larger -> uncertainty increases
+3. The measure of uncertainty should be additive
+
+## **2**
+
+:::quesion
+>Suppose a coin is weighted such that, when it is tossed and lands on a table, it comes up heads 70% of the time. What is the entropy of this coin?
+:::
+
+```{r}
+p_logp <- function(p){
+  if(p == 0) return(0)
+  p * log(p)
+}
+
+calc_entropy <- function(x){
+  avg_logprob <- sum(map_dbl(x, p_logp))
+  -1 * avg_logprob
+}
+
+probs <- c(0.7, 0.3)
+
+calc_entropy(probs)
+```
+
+## **3**
+
+:::question
+> Suppose a four-sided die is loaded such that, when tossed onto a table, it shows “1” 20%, “2” 25%, “3” 25%, and “4” 30% of the time. What is the entropy of this die?
+:::
+
+```{r}
+probs <- c(0.2, 0.25, 0.25, 0.3)
+calc_entropy(probs)
+```
+
+## **4**
+
+:::question
+>Suppose another four-sided die is loaded such that it never shows “4.” The other three sides show equally often. What is the entropy of this die
+:::
+
+```{r}
+probs <- c(1/3, 1/3, 1/3, 0)
+calc_entropy(probs)
+```
+
+# **Medium**
+
+## **1**
+
+:::question
+>Write down and compare the definitions of AIC and WAIC. Which of these criteria is most general? Which assumptions are required to transform the more general criterion into a less general one?
+:::
+
+$$
+\text{lppd} = \sum_{i}^{n}\text{log}
+\int\text{p}(\text{y}_{i}|\theta)\text{p}_{post}(\theta)d\theta
+$$
+
+```{r}
+elpd <- function(object, method="LOO"){
+  
+  object$output[-1] <- paste(object$output$outFilePath,object$output[-1],sep="")
+  
+  if(is.null(object$output$CPO))
+    stop("Please specify the argument 'output_CPO = TRUE' in BayesSUR()!")
+    
+  if(toupper(method) == "LOO"){
+    elpd <- sum(log(read.table(object$output$CPO)))
+    names(elpd) <- "elpd.loo"
+  }else if(toupper(method) == "WAIC"){
+    elpd <- sum(read.table(object$output$WAIC))
+    names(elpd) <- "elpd.waic"
+  }else{
+    stop("Please give the correct method name!")
+  }
+  
+  return(elpd)
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
