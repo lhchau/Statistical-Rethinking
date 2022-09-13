@@ -84,27 +84,21 @@ $$
 \int\text{p}(\text{y}_{i}|\theta)\text{p}_{post}(\theta)d\theta
 $$
 
-```{r}
-elpd <- function(object, method="LOO"){
-  
-  object$output[-1] <- paste(object$output$outFilePath,object$output[-1],sep="")
-  
-  if(is.null(object$output$CPO))
-    stop("Please specify the argument 'output_CPO = TRUE' in BayesSUR()!")
-    
-  if(toupper(method) == "LOO"){
-    elpd <- sum(log(read.table(object$output$CPO)))
-    names(elpd) <- "elpd.loo"
-  }else if(toupper(method) == "WAIC"){
-    elpd <- sum(read.table(object$output$WAIC))
-    names(elpd) <- "elpd.waic"
-  }else{
-    stop("Please give the correct method name!")
-  }
-  
-  return(elpd)
-}
-```
+$$
+\text{AIC} = \text{-2*llpd + 2p} \\
+WAIC(y, \theta) = \text{-2(lppd - }\sum_{i}\text{var}_{\theta}\text{log}p(y_{i}|\theta))
+$$
+
+The WAIC is more general than the AIC, as the AIC assumes that priors are flat or overwhelmed by the likelihood, the posterior distribution is approximately multivariate Gaussian, and the sample size is much greater than the number of parameters. If all of these assumptions are met, then we would expect the AIC and WAIC to be about the same. 
+
+## **2**
+
+:::question
+>Explain the difference between model selection and model comparison. What information is lost under model selection?
+:::
+
+
+
 
 
 
