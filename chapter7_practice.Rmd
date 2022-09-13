@@ -11,6 +11,9 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
+library(rethinking)
+library(tidybayes)
+library(brms)
 ```
 
 # **Easy**
@@ -33,6 +36,7 @@ Insight of information entropy is "How much is our uncertainty reduced by learni
 >Suppose a coin is weighted such that, when it is tossed and lands on a table, it comes up heads 70% of the time. What is the entropy of this coin?
 :::
 
+**Answer**
 ```{r}
 p_logp <- function(p){
   if(p == 0) return(0)
@@ -55,6 +59,7 @@ calc_entropy(probs)
 > Suppose a four-sided die is loaded such that, when tossed onto a table, it shows “1” 20%, “2” 25%, “3” 25%, and “4” 30% of the time. What is the entropy of this die?
 :::
 
+**Answer**
 ```{r}
 probs <- c(0.2, 0.25, 0.25, 0.3)
 calc_entropy(probs)
@@ -66,6 +71,7 @@ calc_entropy(probs)
 >Suppose another four-sided die is loaded such that it never shows “4.” The other three sides show equally often. What is the entropy of this die
 :::
 
+**Answer**
 ```{r}
 probs <- c(1/3, 1/3, 1/3, 0)
 calc_entropy(probs)
@@ -79,6 +85,7 @@ calc_entropy(probs)
 >Write down and compare the definitions of AIC and WAIC. Which of these criteria is most general? Which assumptions are required to transform the more general criterion into a less general one?
 :::
 
+**Answer**
 $$
 \text{lppd} = \sum_{i}^{n}\text{log}
 \int\text{p}(\text{y}_{i}|\theta)\text{p}_{post}(\theta)d\theta
@@ -97,14 +104,140 @@ The WAIC is more general than the AIC, as the AIC assumes that priors are flat o
 >Explain the difference between model selection and model comparison. What information is lost under model selection?
 :::
 
+**Answer**
+   Model selection refers to just pick the model that has the lowest criterion value and discarding other models. When we take this approach, we lose information about the relative model accuracy that can inform how confident we are in the models
+   Additionally, model selection only cares about predictive accuracy and ignores causal inferences. Thus, a model may be selected that has confounds or that would not correctly inform an intervention
+   
+   In contrast, model comparison uses multiple models to understand about how the variables included influence prediction and affect implied conditional independencies in a causal model
+   -> Thus, we can preserve information and can make more hoslistic judgement about the data & models.
+   
+## **3**
+
+:::question
+>When comparing models with an information criterion, why must all models be fit to exactly the same observations? What would happen to the information criterion values, if the models were fit to different numbers of observations? Perform some experiments, if you are not sure.
+:::
+
+**Answer**
+  If we compare models which is trained on different datasets, then we will get into the inconsistency state. The underlying of comparing something is the same context, the same treatment.
+
+  All of the information criteria are defined based on the log-pointwise-predictive density, defined as follows, where y is the data, $\theta$ is the posterior distribution, S is the number of samples, and I is the number of samples.
+  
+$$
+lppd(y,\theta) = \sum_{i}\text{log}\frac{1}{S}\sum_{s}p(y_{i}|\theta_{s})
+$$
+
+  In the words, this means take the log of the average probability across samples of each observation i and sum them together. Thus a larger sample size will necessarily lead to a smaller log-pointwise-predictive-density, even if the data generating process and models are exactly equivalent (i.e., when the lppd values are negative, the sum will get more negative as the sample size increases). More observations are entered into the sum, leading a smaller final lppd, which will in turn increase the information criteria. We can run a quick simulation to demonstrate. For three different sample sizes, we'll simulate 100 data sets from the exact same data generation process, estimate a exact same linear model, and then calculate the lppd, WAIC, and PSIS for each.
+  
+```{r}
+gen_data <- function(n){
+  tibble(x1 = rnorm(n)) %>% 
+    mutate(y = rnorm(n = n, mean = 0.3 + 0.8 * x1),
+           across(everything(), standardize))
+}
+
+fit_model <- function(dat) {
+  suppressMessages(output <- capture.output(
+    mod <- brm(y ~ 1 + x1, data = dat, family = gaussian,
+               prior = c(prior(normal(0, 0.2), class = Intercept),
+                         prior(normal(0, 0.5), class = "b"),
+                         prior(exponential(1), class = sigma)),
+               iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 123)
+  ))
+  
+  return(mod)
+}
 
 
+calc_info <- function(model) {
+  mod_lppd <- log_lik(model) %>% 
+    as_tibble(.name_repair = "minimal") %>% 
+    set_names(paste0("obs_", 1:ncol(.))) %>% 
+    rowid_to_column(var = "iter") %>% 
+    pivot_longer(-iter, names_to = "obs", values_to = "logprob") %>% 
+    mutate(prob = exp(logprob)) %>% 
+    group_by(obs) %>% 
+    summarize(log_prob_score = log(mean(prob))) %>% 
+    pull(log_prob_score) %>% 
+    sum()
+  
+  mod_waic <- suppressWarnings(waic(model)$estimates["waic", "Estimate"])
+  mod_psis <- suppressWarnings(loo(model)$estimates["looic", "Estimate"])
+  
+  tibble(lppd = mod_lppd, waic = mod_waic, psis = mod_psis)
+}
+
+sample_sim <- tibble(sample_size = rep(c(100, 500, 1000), each = 100)) %>%
+  mutate(sample_data = purrr::map(sample_size, gen_data),
+         model = purrr::map(sample_data, fit_model),
+         infc = purrr::map(model, calc_info)) %>%
+  select(-sample_data, -model) %>% 
+  unnest(infc) 
+```
+
+```{r}
+library(ggridges)
+
+sample_sim %>%
+  pivot_longer(cols = c(lppd, waic, psis)) %>%
+  mutate(sample_size = fct_inorder(as.character(sample_size)),
+         name = str_to_upper(name),
+         name = fct_inorder(name)) %>%
+  ggplot(aes(x = value, y = sample_size)) +
+  facet_wrap(~name, nrow = 1, scales = "free_x") +
+  geom_density_ridges(bandwidth = 4) +
+  scale_y_discrete(expand = c(0, .1)) +
+  scale_x_continuous(breaks = seq(-2000, 3000, by = 750)) +
+  coord_cartesian(clip = "off") +
+  labs(x = "Value", y = "Sample Size")
+```
+  
+
+## **4**
+
+:::question
+>What happens to the effective number of parameters, as measured by PSIS or WAIC, as a prior becomes more concentrated? Why? Perform some experiments, if you are not sure.
+:::
+
+**Answer**
+$$
+\text{lppd} = \sum_{i}^{n}\text{log}
+\int\text{p}(\text{y}_{i}|\theta)\text{p}_{post}(\theta)d\theta
+$$
+
+$$
+\text{AIC} = \text{-2*llpd + 2p} \\
+WAIC(y, \theta) = \text{-2(lppd - }\sum_{i}\text{var}_{\theta}\text{log}p(y_{i}|\theta))
+$$
+
+  Smaller variances in log probabilities will results in a lower penalty. If we restrict the prior to become more concentrated, we restrict the plausible range of the parameters. In other words, we restrict the variability in the posterior distribution. As the parameters become more consistent, the log probability of each observation will necessarily become more consistent also. Thus, the penalty term, or effective number of parameters, becomes smaller. We can again confirm with a small simulation
 
 
+## **5**
+
+:::question
+>Provide an informal explanation of why informative priors reduce overfitting.
+:::
+
+**Answer**
+   Informative priors restrict the plausible values for parameters. By using informative priors, we can limit the values of parameters to values that are reasonable, given our scientific knowledge. Thus, we can keep the model from learning too much from our specific sample.
 
 
+## **6**
 
+:::question
+> Provide an informal explanation of why overly informative priors result in underfitting.
+:::
 
+**Answer**
+   In contrast to the previous question, making the prior too informative can be too restrictive on the parameter space. This prevents our model from learning enough from our sample. We basically just get our prior distributions back, without learning anything from the data that could help make future predictions.
+
+# **Hard**
+
+## **1**
+
+:::question
+>In 2007, The Wall Street Journal published an editorial (“We’re Number One, Alas”) with a graph of corportate tax rates in 29 countries plotted against tax revenue. A badly fit curve was drawn in (reconstructed at right), seemingly by hand, to make the argument that the relationship between tax rate and tax revenue increases and then declines, such that higher tax rates can actually produce less tax revenue. I want you to actually fit a curve to these data, found in `data(Laffer)`. Consider models that use tax rate to predict tax revenue. Compare, using WAIC or PSIS, a straight-line model to any curved models you like. What do you conclude about the relationship between tax rate and tax revenue.
+:::
 
 
 
