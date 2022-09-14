@@ -239,6 +239,127 @@ $$
 >In 2007, The Wall Street Journal published an editorial (“We’re Number One, Alas”) with a graph of corportate tax rates in 29 countries plotted against tax revenue. A badly fit curve was drawn in (reconstructed at right), seemingly by hand, to make the argument that the relationship between tax rate and tax revenue increases and then declines, such that higher tax rates can actually produce less tax revenue. I want you to actually fit a curve to these data, found in `data(Laffer)`. Consider models that use tax rate to predict tax revenue. Compare, using WAIC or PSIS, a straight-line model to any curved models you like. What do you conclude about the relationship between tax rate and tax revenue.
 :::
 
+```{r}
+data(Laffer)
+df <- Laffer
+
+df %>% 
+  as_tibble() %>% 
+  ggplot(aes(x = tax_rate, y = tax_revenue)) +
+  geom_point()
+
+df <- df %>% 
+  mutate(across(everything(), standardize),
+         tax_rate2 = tax_rate^2)
+
+laf_line <- brm(tax_revenue ~ 1 + tax_rate, 
+                data = df, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 1000, warmup = 500, chains = 4, cores = 4, seed = 123,
+                file = here::here("fits", "chp7", "b7h1-line.rds"))
+
+laf_quad <- brm(tax_revenue ~ 1 + tax_rate + tax_rate2, 
+                data = df, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(exponential(1), class = sigma)),
+                iter = 1000, warmup = 500, chains = 4, cores = 4, seed = 123,
+                file = here::here("fits", "chp7", "b7h1-quad.rds"))
+# spine
+laf_spln <- brm(tax_revenue ~ 1 + s(tax_rate, bs = "bs"),
+                data = df, family = gaussian,
+                prior = c(prior(normal(0, 0.2), class = Intercept),
+                          prior(normal(0, 0.5), class = b),
+                          prior(normal(0, 0.5), class = sds),
+                          prior(exponential(1), class = sigma)),
+                iter = 1000, warmup = 500, chains = 4, cores = 4, seed = 123,
+                control = list(adapt_delta = 0.95),
+                file = here::here("fits", "chp7", "b7h1-spln.rds"))
+```
+
+```{r}
+library(wjake)
+
+tr_seq <- tibble(tax_rate = seq(0, 40, length.out = 100)) %>% 
+  mutate(tax_rate = (tax_rate - mean(Laffer$tax_rate)) / sd(Laffer$tax_rate),
+         tax_rate2 = tax_rate^2)
+
+predictions <- bind_rows(
+  predicted_draws(laf_line, newdata = tr_seq) %>% 
+    median_qi(.width = 0.89) %>% 
+    mutate(type = "Linear"),
+  predicted_draws(laf_quad, newdata = tr_seq) %>%
+    median_qi(.width = 0.89) %>%
+    mutate(type = "Quadratic"),
+  predicted_draws(laf_spln, newdata = tr_seq) %>%
+    median_qi(.width = 0.89) %>%
+    mutate(type = "Spline")
+)
+
+fits <- bind_rows(
+  epred_draws(laf_line, newdata = tr_seq) %>%
+    median_qi(.width = c(0.67, 0.89, 0.97)) %>%
+    mutate(type = "Linear"),
+  epred_draws(laf_quad, newdata = tr_seq) %>%
+    median_qi(.width = c(0.67, 0.89, 0.97)) %>%
+    mutate(type = "Quadratic"),
+  epred_draws(laf_spln, newdata = tr_seq) %>%
+    median_qi(.width = c(0.67, 0.89, 0.97)) %>%
+    mutate(type = "Spline")
+)
+
+ggplot() +
+  facet_wrap(~type, nrow = 1) +
+  geom_ribbon(data = predictions,
+              aes(x = tax_rate, ymin = .lower, ymax = .upper),
+              alpha = 0.2) +
+  geom_lineribbon(data = fits,
+                  aes(x = tax_rate, y = .epred, ymin = .lower, ymax = .upper),
+                  size = 0.6) +
+  geom_point(data = laf_dat, aes(x = tax_rate, y = tax_revenue),
+             alpha = 0.5) +
+  scale_fill_manual(values = ramp_blue(seq(0.9, 0.1, length.out = 3)),
+                    breaks = c(0.67, 0.89, 0.97)) +
+  labs(x = "Standardized Tax Rate", y = "Standardized Tax Revenue",
+       fill = "Interval")
+
+```
+
+They all look pretty similar, but the quadratic and spline models do show a slight curve. Next, we can look at the PSIS (called LOO in {brms} and {rstan}) and WAIC comparisons. Neither the PSIS or WAIC is really able to differentiate the models in a meaningful way. However, it should be noted that both the PSIS and WAIC have Pareto or penalty values that are exceptionally large, which could make the criteria unreliable.
+
+```{r}
+library(loo)
+
+laf_line <- add_criterion(laf_line, criterion = c("loo", "waic"))
+laf_quad <- add_criterion(laf_quad, criterion = c("loo", "waic"))
+laf_spln <- add_criterion(laf_spln, criterion = c("loo", "waic"))
+
+loo_compare(laf_line, laf_quad, laf_spln, criterion = "waic")
+#>          elpd_diff se_diff
+#> laf_quad  0.0       0.0   
+#> laf_spln -0.1       0.6   
+#> laf_line -0.9       0.9
+loo_compare(laf_line, laf_quad, laf_spln, criterion = "loo")
+#>          elpd_diff se_diff
+#> laf_spln  0.0       0.0   
+#> laf_quad  0.0       0.7   
+#> laf_line -0.8       0.9
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
