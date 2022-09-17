@@ -14,6 +14,8 @@ library(tidyverse)
 library(rethinking)
 library(tidybayes)
 library(brms)
+
+theme_set(theme_light())
 ```
 
 # **Easy**
@@ -277,6 +279,10 @@ laf_spln <- brm(tax_revenue ~ 1 + s(tax_rate, bs = "bs"),
                 iter = 1000, warmup = 500, chains = 4, cores = 4, seed = 123,
                 control = list(adapt_delta = 0.95),
                 file = here::here("fits", "chp7", "b7h1-spln.rds"))
+
+laf_line <- readRDS(here::here("fits", "chp7", "b7h1-line.rds"))
+laf_quad <- readRDS(here::here("fits", "chp7", "b7h1-quad.rds"))
+laf_spln <- readRDS(here::here("fits", "chp7", "b7h1-spln.rds"))
 ```
 
 ```{r}
@@ -318,13 +324,12 @@ ggplot() +
   geom_lineribbon(data = fits,
                   aes(x = tax_rate, y = .epred, ymin = .lower, ymax = .upper),
                   size = 0.6) +
-  geom_point(data = laf_dat, aes(x = tax_rate, y = tax_revenue),
+  geom_point(data = df, aes(x = tax_rate, y = tax_revenue),
              alpha = 0.5) +
   scale_fill_manual(values = ramp_blue(seq(0.9, 0.1, length.out = 3)),
                     breaks = c(0.67, 0.89, 0.97)) +
   labs(x = "Standardized Tax Rate", y = "Standardized Tax Revenue",
        fill = "Interval")
-
 ```
 
 They all look pretty similar, but the quadratic and spline models do show a slight curve. Next, we can look at the PSIS (called LOO in {brms} and {rstan}) and WAIC comparisons. Neither the PSIS or WAIC is really able to differentiate the models in a meaningful way. However, it should be noted that both the PSIS and WAIC have Pareto or penalty values that are exceptionally large, which could make the criteria unreliable.
@@ -349,8 +354,125 @@ loo_compare(laf_line, laf_quad, laf_spln, criterion = "loo")
 ```
 
 
+## **2**
+
+:::question
+>In the Laffer data, there is one country with a high tax revenue that is an outlier. Use PSIS and WAIC to measure the importance of this outlier in the models you fit in the previous problem. Then use robust regression with a Student’s t distribution to revist the curve fitting problem. How much does a curved relationship depend upon the outlier point.
+:::
+
+```{r}
+library(gghighlight)
+
+criteria_influence <- function(mod) {
+  tibble(pareto_k = mod$criteria$loo$diagnostics$pareto_k,
+         p_waic = mod$criteria$waic$pointwise[, "p_waic"]) %>% 
+    rowid_to_column(var = "obs")
+}
+
+influ <- bind_rows(
+  criteria_influence(laf_line) %>% 
+    mutate(type = "Linear"),
+  criteria_influence(laf_quad) %>% 
+    mutate(type = "Quadratic"),
+  criteria_influence(laf_spln) %>% 
+    mutate(type = "Spline")
+)
+
+influ %>% 
+  ggplot(aes(x = pareto_k, y = p_waic)) +
+  facet_wrap(~ type, nrow = 1) +
+  geom_vline(xintercept = 0.7, linetype = "dashed") +
+  geom_hline(yintercept = 0.4, linetype = "dashed") +
+  geom_point() +
+  gghighlight(pareto_k > 0.7 | p_waic > 0.4, n = 1, label_key = obs,
+              label_params = list(size = 3)) +
+  labs(x = "Pareto *k*", y = "p<sub>WAIC</sub>")
+```
+
+Let’s refit the model using a Student’s t distribution to put larger tails on our outcome distribution, and then visualize our new models.
+
+```{r}
+laf_line2 <- brm(bf(tax_revenue ~ 1 + tax_rate, nu = 1),
+                 data = df, family = student,
+                 prior = c(prior(normal(0, 0.2), class = Intercept),
+                           prior(normal(0, 0.5), class = b),
+                           prior(exponential(1), class = sigma)),
+                 iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 123,
+                 file = here::here("fits", "chp7", "b7h2-line.rds"))
+
+laf_quad2 <- brm(bf(tax_revenue ~ 1 + tax_rate + tax_rate2, nu = 1),
+                 data = df, family = student,
+                 prior = c(prior(normal(0, 0.2), class = Intercept),
+                           prior(normal(0, 0.5), class = b),
+                           prior(exponential(1), class = sigma)),
+                 iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 123,
+                 file = here::here("fits", "chp7", "b7h2-quad.rds"))
+
+laf_spln2 <- brm(bf(tax_revenue ~ 1 + s(tax_rate, bs = "bs"), nu = 1),
+                 data = df, family = student,
+                 prior = c(prior(normal(0, 0.2), class = Intercept),
+                           prior(normal(0, 0.5), class = b),
+                           prior(exponential(1), class=  sigma)),
+                 iter = 4000, warmup = 2000, chains = 4, cores = 4, seed = 123,
+                 file = here::here("fits", "chp7", "b7h2-spln.rds"))
+
+predictions <- bind_rows(
+  predicted_draws(laf_line2, newdata = tr_seq) %>% 
+    median_qi(.width = 0.89) %>% 
+    mutate(type = "Linear"),
+  predicted_draws(laf_quad2, newdata = tr_seq) %>% 
+    median_qi(.width = 0.89) %>% 
+    mutate(type = "Quadratic"),
+  predicted_draws(laf_spln2, newdata = tr_seq) %>% 
+    median_qi(.width = 0.89) %>% 
+    mutate(type = "Spline")
+)
 
 
+# epred_draws -> 
+fits <- bind_rows(
+  add_epred_draws(laf_line2, newdata = tr_seq) %>% 
+    median_qi(.width = c(0.67, 0.89, 0.97)) %>% 
+    mutate(type = "Linear"),
+  add_predicted_draws(laf_quad2, newdata = tr_seq) %>% 
+    median_qi(.width = c(0.67, 0.89, 0.97)) %>% 
+    mutate(type = "Quadratic"),
+  add_predicted_draws(laf_spln2, newdata = tr_seq) %>% 
+    median_qi(.width = c(0.67, 0.89, 0.97)) %>% 
+    mutate(type = "Spline")
+)
+
+ggplot() +
+  facet_wrap(~type, nrow = 1) +
+  geom_ribbon(data = predictions, 
+              aes(x = tax_rate, ymin = .lower, ymax = .upper),
+              alpha = 0.2) +
+  geom_lineribbon(data = fits,
+                  aes(x = tax_rate, y = .epred, ymin = .lower, ymax = .upper),
+                  alpha = 0.6) +
+  geom_point(data = df, aes(x = tax_rate, y = tax_revenue),
+             alpha = 0.5) +
+  scale_fill_manual(values = ramp_blue(seq(0.9, 0.1, length.out = 3)),
+                    breaks = c(0.67, 0.89, 0.97)) +
+  labs(x = "Standardized Tax Rate", y = "Standardized Tax Revenue",
+       fill = "Interval")
+```
+
+The prediction intervals are a little bit narrower, which makes sense as the predictions are no longer being as influenced by the outlier. When we look at the new PSIS and WAIC estimates, we are no longer getting warning messages about large Pareto k values; however, we do still see warnings about large $p_{WAIC}$ values. The comparisons also tell the same story as before, with no distinguishable differences between the models.
+
+```{r}
+
+influ2 <- bind_rows(
+  criteria_influence(laf_line2) %>% 
+    mutate(type = "Linear"),
+  criteria_influence(laf_quad2) %>% 
+    mutate(type = "Quadratic"),
+  criteria_influence(laf_spln2) %>% 
+    mutate(type = "Spline")
+)
+
+
+```
 
 
 
