@@ -1,6 +1,6 @@
 library(tidyverse)
 library(rcartocolor)
-
+library(rethinking)
 (
   d <- 
     tibble(species = c("afarensis", "africanus", "habilis", "boisei", "rudolfensis", "ergaster", "sapiens"), 
@@ -143,5 +143,35 @@ library(patchwork)
 (p1 + p2) / (p3 + p4) / (p5 + p6)
 
 
+data(cars)
+m <- quap(
+  alist(
+    dist ~ dnorm(mu, sigma),
+    mu <- a + b*speed,
+    a ~ dnorm(0, 100),
+    b ~ dnorm(0, 10),
+    sigma ~ dexp(1)
+  ), data = cars
+)
+
+set.seed(94)
+post <- extract.samples(m, n = 1000)
+
+n_samples <- 1000
+logprob <- sapply(1:n_samples,
+                  function(s){
+                    mu <- post$a[s] + post$b[s]*cars$speed
+                    dnorm(cars$dist, mu, post$sigma[s], log = TRUE)
+                  })
+
+n_cases <- nrow(cars)
+lppd <- sapply( 1:n_cases , function(i) log_sum_exp(logprob[i,]) - log(n_samples) )
+
+pWAIC <- sapply( 1:n_cases , function(i) var(logprob[i,]) )
+
+-2*( sum(lppd) - sum(pWAIC) )
+
+waic_vec <- -2*( lppd - pWAIC )
+sqrt( n_cases*var(waic_vec) )
 
 
