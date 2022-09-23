@@ -1,0 +1,119 @@
+---
+title: "Untitled"
+author: "Hoang-Chau Luong"
+date: '2022-09-23'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(rethinking)
+```
+
+# **Easy**
+
+## **1**
+
+:::question
+>For each of the causal relationships below, name a hypothetical third variable that would lead to an interaction effect.
+1. Bread dough rises because of yeast.
+2. Education leads to higher income.
+3. Gasoline makes a car go.
+:::
+
+**Answer**:
+
+1. yeast ->  Bread dough <- Baking temperature (*Suggested answer: Bread dough rises because yeast, conditional on the presence of sugar. This is an interaction between yeast and sugar.*)
+
+2. Education -> Higher income <- High test (*Suggested answer: Education leads to higher income, conditional on field of study. Some types of degrees lead to higher income than others.*)
+
+3. Gasoline -> Car go <- health car (*Suggested answer: Gasoline makes a car go, unless it has no spark plugs (or belts, or wheels, etc.)*)
+
+## **2**
+
+:::question
+>Which of the following explanations invokes an interaction
+1. Caramelizing onionos requires cooking over low heat and making sure the onions do not dry out.
+2. A car will go faster when it has more cylinders or when it has a better fuel injector.
+3. Most people acquire their political beliefs from their parents, unless they get them instead from their friends.
+4. Intelligent animal species tend to be either highly social or have manipulation appendages (hands, tentacles, etc.)
+:::
+
+**Answer**:
+
+1. Yes
+2. Yes
+3. No
+4. No
+
+*Suggested solution: Only number 1. is a strict interaction. The others all imply additive influences. For 1., you could express it as "cooking with low heat leads to caramelizing, conditional on onions not drying out." That's an interaction, as the effect of heat depends upon moisture. For 2., a car with many cylinders can go fast, whether or not it also has a good fuel injector. The reverse is also implied: either a fuel injector or more cylinders is sufficient to make a car go faster. For 3., the statement does not imply that the influence of parents depends upon the beliefs of friends. It just implies that one may be influenced by either parents or friends. For 4., the word "or" gives away that is another case in which either factor, sociality or manipulative appendages (hands, tentacles), is sufficient to predict intelligence.*
+
+## **3**
+
+:::question
+> For each of the explanations in 8E2, write a linear model that expresses the stated relationship.
+:::
+
+**Answer**:
+
+1. For outcome "extent caramelized", $\mu_{i} = \alpha + \beta_{H}H_{i} + \beta_{M}M_{i}+\beta_{HM}H_{i}M_{i}.$
+2. For outcome "maximum speed", $\mu_{i} = \alpha + \beta_{C}C_{i} + \beta_{F}F_{i}.$
+3. For outcome "extent conservative", $\mu_{i} = \alpha + \beta_{P}P_{i} + \beta_{F}F_{i}.$
+4. For outcome "intelligence $\mu_{i} = \alpha + \beta_{S}S_{i} + \beta_{M}M_{i}.$
+
+# **Medium**
+
+## **1**
+
+:::question
+>Recall the tuplips example from the chapter. Suppose another set of treatments adjusted the temperature in the greenhouse over two levels: cold and hot. The data in the chapter were collected at the cold temperature. You find none of the plants grown under the hot temperature developed any blooms at all, regardless of the water and shade levels. Can you explain this result in terms of interactions between `water`, `shade` and `temperature`
+:::
+
+**Answer**
+
+*Suggested solution: Tulips are a winter flower in much of their natural range. High temperatures do frustrate them. This is not a linear interaction, because by raising temperature the effect was to prevent all blooms. A linear effect would be an additive change. But it is still correct to say that there is a three-way interaction here: The influence of water and shade depend upon one another, and both and their interaction depend upon temperature.*
+
+Just as in the chapter where water had no effect when there was no light, we see that neither water nor light have an effect when temperature is high.
+
+## **2**
+
+:::question
+>Can you invent a regression equation that would make the bloom size zero, whenever the temperature is hot?
+:::
+
+**Answer**:
+
+Let $H_{i}$ be a 0/1 indicator of whether or not the temperature was hot. Then:
+
+$$
+\mu_{i} = L_{i}(1-H_{i})
+$$
+
+We can see that, when $H_{i} = 1$, the entire model is zero, regardless of the value of $L_{i}$
+
+## **3**
+
+:::question
+>In parts of North America, ravens depend upon wolves for their food. This is because ravens are carnivorous but cannot usually kill or open carcesses of prey. Wolves however can and do kill and tear open animals, and they tolerate ravens co-feeding at their kills. This species relationship is generally described as a "species interaction." Can you invent a hypothetical set of data on raven population size in which this relationship would manifest as a statistical interaction? Do you think the biological interaction could be linear? Why or why not?
+:::
+
+**Answer**:
+
+*Suggested solution 1: In order to predict raven population size based on wolf population size, we should include data on the territory area for the wolves, the number of wolves, and amount of food available, and finally the number of ravens. This is similar to the types of data included in `data(foxes)`. I would expect the relationship to be non-linear. When there are no wolves, I would expect there to be no ravens. As the number of wolves increases, the number of ravens would also increase. However, eventually the number of wolves would increase to the point that the wolves exhaust the food supply, leaving no food left for the ravens, at which point the raven population would begin to shrink. Thus, if we created a counter factual plot with wolves on the x-axis and ravens on the y-axis, I would expect to see at linear trend at first, but then the raven population level off or drop when there is a large numbers of wolves.*
+
+*Suggested solution 2: The implied relationship between ravens and wolves is one in which wolves do not need ravens, but ravens very much do benefit from wolves (at least in some special places).*
+
+```{r}
+df <- tibble(Region = c(1:6),
+             Wolves = c(12, 15, 7, 30, 17, 70),
+             Ravens = c(43, 46, 28, 99, 60, 212))
+
+df %>% knitr::kable()
+```
+
+
+
+
+
