@@ -113,6 +113,13 @@ df <- tibble(Region = c(1:6),
 df %>% knitr::kable()
 ```
 
+*Really, this “interaction” is not a stastical interaction effect at all, because just stating that ravens depend upon wolves implies that we can partially predict raven density with wolf density. A statistical interaction requires instead that some other third variable regulate the dependency of ravens on wolves. For example, in regions in which there is plenty of small prey for ravens to kill and consume on their own, the presence of wolves may not matter at all.*
+
+## **4**
+
+:::question
+>Repeat the tulips analysis, but this time use priors that constrain the effect of water to be positive and the effect of shade to be negative. Use prior predictive simulation. What do these prior assumptions mean for the interaction prior, if anything?
+:::
 
 
 
